@@ -12,6 +12,9 @@ internal sealed class MapPresets
 {
     private const string PresetKey = "preset";
     private const string PresetsKey = "presets";
+    private const string MapsKey = "maps";
+    private const string PathKey = "path";
+    private const string EnabledKey = "enabled";
 
     private KVObject data = KVObject.Collection();
 
@@ -20,6 +23,9 @@ internal sealed class MapPresets
 
     // the map's own presets by name, Custom and Entities only, as option ids and their values written out
     public Dictionary<string, Dictionary<string, string>> Presets { get; } = [];
+
+    // for a map list, all of its maps in order, the ones turned off too. Empty for a map
+    public List<ListedMap> Maps { get; } = [];
 
     public static string PathFor(string map)
     {
@@ -52,6 +58,19 @@ internal sealed class MapPresets
         if (stored.data.TryGetValue(PresetsKey, out var presets))
         {
             ReadPresets(presets, stored.Presets);
+        }
+
+        if (stored.data.TryGetValue(MapsKey, out var maps) && maps.IsCollection)
+        {
+            // "maps" { "1" { "path" "...\e1m1.vmap" "enabled" "1" } "2" { ... } }, in the order theyre built
+            foreach (var (_, map) in maps.Children.Where(m => m.Value.IsCollection))
+            {
+                if (map.TryGetValue(PathKey, out var path) && (string)path is { Length: > 0 } file)
+                {
+                    var enabled = !map.TryGetValue(EnabledKey, out var on) || (string)on != "0";
+                    stored.Maps.Add(new ListedMap(file, enabled));
+                }
+            }
         }
 
         return stored;
@@ -114,7 +133,22 @@ internal sealed class MapPresets
 
         saved.Add(PresetsKey, WritePresets(Presets));
 
-        foreach (var child in data.Children.Where(c => c.Key is not (PresetKey or PresetsKey)))
+        if (Maps.Count > 0)
+        {
+            var maps = KVObject.Collection();
+
+            for (var i = 0; i < Maps.Count; i++)
+            {
+                var map = KVObject.Collection();
+                map.Add(PathKey, Maps[i].Path);
+                map.Add(EnabledKey, Maps[i].Enabled ? "1" : "0");
+                maps.Add((i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), map);
+            }
+
+            saved.Add(MapsKey, maps);
+        }
+
+        foreach (var child in data.Children.Where(c => c.Key is not (PresetKey or PresetsKey or MapsKey)))
         {
             saved.Add(child.Key, child.Value);
         }

@@ -235,6 +235,8 @@
             <DockPanel DockPanel.Dock="Bottom" Margin="12,4,12,8">
                 <!-- how far the compile has got, while it runs -->
                 <ProgressBar Name="compileBar" DockPanel.Dock="Right" Width="320" Margin="12,0,0,0" Maximum="100" ShowProgressText="True" VerticalAlignment="Center" IsVisible="False" />
+                <!-- which map of a map list is building, next to the bar -->
+                <TextBlock Name="mapProgressLabel" DockPanel.Dock="Right" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource ContrastBrush}" IsVisible="{Binding #compileBar.IsVisible}" />
                 <TextBlock Name="statusLabel" Text="Ready" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource ContrastBrush}" />
             </DockPanel>
 
@@ -257,6 +259,12 @@
                         <StackPanel>
                             <Image Source="avares://Source2MapCompiler/assets/buttons/open.png" RenderOptions.BitmapInterpolationMode="HighQuality" />
                             <TextBlock Text="Open .vmap" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tool" Tag="labelopendirectory" Click="OnOpenDirectory">
+                        <StackPanel>
+                            <Image Source="avares://Source2MapCompiler/assets/buttons/open.png" RenderOptions.BitmapInterpolationMode="HighQuality" />
+                            <TextBlock Text="Open Directory" />
                         </StackPanel>
                     </Button>
                     <Button Name="button5" Classes="tool" Tag="labeloverrideoutput" IsEnabled="False" Click="button5_Click">
@@ -320,7 +328,23 @@
                         </Border>
 
                         <Grid ColumnDefinitions="*,8,*">
-                            <StackPanel Name="leftColumn" Spacing="8" />
+                            <!-- the left column's cards are rebuilt for each game, so the map list sits above them rather than among them -->
+                            <StackPanel Spacing="8">
+                                <!-- the maps of a map list, each turned on or off for the compile, or taken out of the list -->
+                                <Border Name="mapListCard" Classes="card" IsVisible="False">
+                                    <StackPanel>
+                                        <DockPanel Classes="stage">
+                                            <TextBlock Name="mapListCount" DockPanel.Dock="Right" Classes="note" Margin="0" VerticalAlignment="Center" />
+                                            <TextBlock Classes="heading" Text="Maps" />
+                                        </DockPanel>
+                                        <TextBlock Classes="note" Text="Compiled from top to botton" />
+                                        <ScrollViewer MaxHeight="260">
+                                            <StackPanel Name="mapListPanel" Margin="0,0,12,0" />
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel Name="leftColumn" Spacing="8" />
+                            </StackPanel>
                             <StackPanel Name="rightColumn" Grid.Column="2" Spacing="8" />
                         </Grid>
 

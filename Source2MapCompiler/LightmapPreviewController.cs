@@ -25,13 +25,35 @@ internal sealed class LightmapPreviewController(Window owner, Action<string> log
     // raised on the first update there is, from when on there's always a preview to show
     public event EventHandler? Available;
 
+    private int compilerProcessId;
+    private string vrad3Folder = "";
+
     public void Start(int compilerProcessId, string vrad3Folder)
     {
         Stop();
 
         closedDuringCompile = false;
         ended = null;
+        this.compilerProcessId = compilerProcessId;
+        this.vrad3Folder = vrad3Folder;
+        StartMonitor();
+    }
 
+    // the preview will only follow one lightmap at a time when using a maplist
+    public void NextMap()
+    {
+        if (monitor == null)
+        {
+            return;
+        }
+
+        monitor.Dispose();
+        monitor = null;
+        StartMonitor();
+    }
+
+    private void StartMonitor()
+    {
         var current = new LightmapPreviewMonitor(compilerProcessId, vrad3Folder);
         current.Message += (_, message) => log(message);
         // Updates that arrive after the compile ended, or from an older compile's monitor, get dropped

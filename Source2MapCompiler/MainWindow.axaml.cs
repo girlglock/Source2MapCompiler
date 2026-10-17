@@ -69,6 +69,10 @@ public partial class MainWindow : Window
     private Stopwatch progressClock = new();
     private string unfinishedLine = "";
 
+    // list of the maps to be compiled... hidden if only one
+    private string[] listedMaps = [];
+    private int shownMap = 1;
+
     // the reader ends the line it was printing and starts the next at once, so the log takes both at once too
     private readonly System.Threading.Lock logLock = new();
 
@@ -250,6 +254,38 @@ public partial class MainWindow : Window
         return Path.GetExtension(path)?.Equals(".txt", StringComparison.OrdinalIgnoreCase) == true;
     }
 
+    // get the maps in a maplist
+    private static string[] ReadListedMaps(string list)
+    {
+        try
+        {
+            return MapList.Read(list);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    // text next to the progress bar eg: "2 of 13 (pawsome_map2)"
+    private string ListProgressText()
+    {
+        if (listedMaps.Length < 2)
+        {
+            return "";
+        }
+
+        var text = $"{shownMap} of {listedMaps.Length}";
+
+        // just in case
+        if (shownMap <= listedMaps.Length)
+        {
+            text += $" ({Path.GetFileNameWithoutExtension(listedMaps[shownMap - 1])})";
+        }
+
+        return text;
+    }
+
     private bool IsCompiling()
     {
         return compileTask is { IsCompleted: false };
@@ -278,6 +314,11 @@ public partial class MainWindow : Window
             await MessageDialog.ShowAsync(this, MessageKind.Danger, "Source2 Map Compiler", "No .vmap is specified.");
             return;
         }
+        if (IsTextFile(mappath) && !mapListEntries.Any(map => map.Enabled))
+        {
+            await MessageDialog.ShowAsync(this, MessageKind.Warning, "Source2 Map Compiler", "Every map in the map list is turned off...");
+            return;
+        }
         button1.IsEnabled = false;
         arg = ArgumentBuilder() + string.Format(null, "\"{0}\"", outputpath);
         compileTask = ProcessThread();
@@ -299,8 +340,13 @@ public partial class MainWindow : Window
         var stopwatch = Stopwatch.StartNew();
         progress = new CompileProgress(new OptionValues(values, game), Vrad3Folder());
         progressClock = stopwatch;
+        listedMaps = IsTextFile(mappath) ? ReadListedMaps(mappath!) : [];
+        shownMap = 1;
+        mapProgressLabel.Text = "";
         compileBar.Value = 0;
         compileBar.IsVisible = true;
+        // resourcecompiler has the list it was given.. changing it past that would make the progress expect wrong data
+        mapListCard.IsEnabled = false;
         int exitCode;
 
         process = new Process();
@@ -358,6 +404,7 @@ public partial class MainWindow : Window
             button1.IsEnabled = true;
             progress = null;
             compileBar.IsVisible = false;
+            mapListCard.IsEnabled = true;
 
             if (OperatingSystem.IsWindows())
             {
@@ -533,38 +580,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        string[] addonDirectories = {
-            "csgo_addons",
-            "hlvr_addons",
-            "citadel_addons",
-            "dota_addons",
-            "testbed_addons",
-            "steamtours_addons"
-        };
-
-        // the folder of the map that's open, or else the game's addons
-        IStorageFolder? initialDirectory = Path.GetDirectoryName(mappath) is { } mapFolder && Directory.Exists(mapFolder)
-            ? await StorageProvider.TryGetFolderFromPathAsync(mapFolder)
-            : null;
-
-        if (initialDirectory == null)
-        {
-            foreach (string addonDir in addonDirectories)
-            {
-                string path = Path.Combine(Directory.GetParent(cs2dir)!.Parent!.Parent!.FullName, "content", addonDir);
-                if (Directory.Exists(path))
-                {
-                    initialDirectory = await StorageProvider.TryGetFolderFromPathAsync(path);
-                    break;
-                }
-            }
-        }
-
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open .vmap",
             AllowMultiple = false,
-            SuggestedStartLocation = initialDirectory,
+            SuggestedStartLocation = await MapPickerStart(),
             FileTypeFilter =
             [
                 new FilePickerFileType("Hammer Map File") { Patterns = ["*.vmap"] },
@@ -574,9 +594,209 @@ public partial class MainWindow : Window
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } file)
         {
-            SetMap(file);
-            SaveSettings(settings => settings.For(game).Map = file);
+            OpenMap(file);
         }
+    }
+
+    private void OpenMap(string file)
+    {
+        SetMap(file);
+        SaveSettings(settings => settings.For(game).Map = file);
+    }
+
+    // the folder of the map that's open, or else the game's addons
+    private async Task<IStorageFolder?> MapPickerStart()
+    {
+        if (Path.GetDirectoryName(mappath) is { } mapFolder && Directory.Exists(mapFolder))
+        {
+            return await StorageProvider.TryGetFolderFromPathAsync(mapFolder);
+        }
+
+        string[] addonDirectories = {
+            "csgo_addons",
+            "hlvr_addons",
+            "citadel_addons",
+            "dota_addons",
+            "testbed_addons",
+            "steamtours_addons"
+        };
+
+        foreach (string addonDir in addonDirectories)
+        {
+            string path = Path.Combine(Directory.GetParent(cs2dir!)!.Parent!.Parent!.FullName, "content", addonDir);
+            if (Directory.Exists(path))
+            {
+                return await StorageProvider.TryGetFolderFromPathAsync(path);
+            }
+        }
+
+        return null;
+    }
+
+    // makes a maplist.txt in the folder picked of every .vmap in it and the folders inside it them opens it
+    private async void OnOpenDirectory(object? sender, RoutedEventArgs e)
+    {
+        if (cs2dir == null)
+        {
+            await MessageDialog.ShowAsync(this, MessageKind.Warning, "Source2 Map Compiler", "Set the game path with Custom Path first.");
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Open Directory",
+            AllowMultiple = false,
+            SuggestedStartLocation = await MapPickerStart(),
+        });
+
+        if (folders.Count == 0 || folders[0].TryGetLocalPath() is not { } folder)
+        {
+            return;
+        }
+
+        var maps = MapList.Find(folder);
+
+        if (maps.Length == 0)
+        {
+            await MessageDialog.ShowAsync(this, MessageKind.Info, "Open Directory", $"There are no .vmap files in {folder}.");
+            return;
+        }
+
+        var list = Path.Combine(folder, MapList.FileName);
+
+        if (File.Exists(list) && !await MessageDialog.AskAsync(this, MessageKind.Warning, "Open Directory", $"There's already a {MapList.FileName} in {folder}. Replace it with the {maps.Length} map(s) found there?", "Replace"))
+        {
+            return;
+        }
+
+        try
+        {
+            MapList.Write(list, maps.Select(map => new ListedMap(map, true)));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            await MessageDialog.ShowAsync(this, MessageKind.Danger, "Open Directory", $"Could not write {list}: {exception.Message}");
+            return;
+        }
+
+        OpenMap(list);
+    }
+
+    // list of the maplist.txt
+    private List<ListedMap> mapListEntries = [];
+
+    //reads the maplist.txt and if its only one hides the ui list
+    private void LoadMapList(string? file)
+    {
+        mapListEntries = [];
+
+        if (IsTextFile(file))
+        {
+            var inFile = ReadListedMaps(file!);
+            var remembered = Remembered(() => MapPresets.Load(file!))?.Maps ?? [];
+            mapListEntries = MapList.Merge(inFile, remembered);
+        }
+
+        mapListCard.IsVisible = IsTextFile(file);
+        ShowMapList();
+    }
+
+    // one row for each map
+    private void ShowMapList()
+    {
+        mapListPanel.Children.Clear();
+
+        for (var i = 0; i < mapListEntries.Count; i++)
+        {
+            mapListPanel.Children.Add(MapListRow(i));
+        }
+
+        ShowMapListCount();
+    }
+
+    private void ShowMapListCount()
+    {
+        var enabled = mapListEntries.Count(map => map.Enabled);
+        mapListCount.Text = mapListEntries.Count == 0 ? "no maps" : $"{enabled} of {mapListEntries.Count} enabled";
+    }
+
+    private DockPanel MapListRow(int index)
+    {
+        var entry = mapListEntries[index];
+        var listFolder = Path.GetDirectoryName(mappath) ?? "";
+        var folder = Path.GetDirectoryName(entry.Path) ?? "";
+
+        // a path written by hand can be relative
+        var rooted = Path.IsPathRooted(entry.Path);
+        var exists = !rooted || File.Exists(entry.Path);
+        var shownFolder = rooted ? Path.GetRelativePath(listFolder, folder) : folder;
+
+        var name = new TextBlock { Text = Path.GetFileNameWithoutExtension(entry.Path), VerticalAlignment = VerticalAlignment.Center };
+        var where = new TextBlock { Classes = { "note" }, Margin = new Thickness(0), Text = exists ? shownFolder : "Not found" };
+
+        if (!exists)
+        {
+            where.Foreground = Brush("ErrorTextBrush");
+        }
+
+        var toggle = new ToggleSwitch { IsChecked = entry.Enabled, VerticalAlignment = VerticalAlignment.Center };
+        toggle.IsCheckedChanged += (_, _) =>
+        {
+            mapListEntries[index] = entry with { Enabled = toggle.IsChecked == true };
+            SaveMapList();
+        };
+        ToolTip.SetTip(toggle, "Build this map, or skip it");
+
+        var remove = new Button { Content = "Remove", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+        remove.Click += (_, _) =>
+        {
+            mapListEntries.RemoveAt(index);
+            SaveMapList();
+            ShowMapList();
+        };
+        ToolTip.SetTip(remove, "Take this map out of the map list");
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { toggle, remove } };
+        DockPanel.SetDock(buttons, Dock.Right);
+
+        // a dot is the lists root
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name } };
+        if (where.Text is not ("." or ""))
+        {
+            text.Children.Add(where);
+        }
+
+        var row = new DockPanel { Classes = { "stage" }, Margin = new Thickness(0, 2), Children = { buttons, text } };
+        ToolTip.SetTip(text, entry.Path);
+        return row;
+    }
+
+    // saves the edited maplists file based on what the user has removed
+    private void SaveMapList()
+    {
+        if (mappath is not { } list)
+        {
+            return;
+        }
+
+        try
+        {
+            MapList.Write(list, mapListEntries);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Log("(Source2MapCompiler) Could not write the map list " + list + ": " + exception.Message + "\n", LogKind.Error);
+        }
+
+        Remember(() =>
+        {
+            var stored = MapPresets.Load(list) ?? new MapPresets();
+            stored.Maps.Clear();
+            stored.Maps.AddRange(mapListEntries);
+            stored.Save(list);
+        });
+
+        ShowMapListCount();
     }
 
     // The map's path below its content folder, so content\csgo_addons\x\maps\x.vmap gives csgo_addons\x\maps\x.vmap. Null for
@@ -689,6 +909,7 @@ public partial class MainWindow : Window
         Title = $"Source2 Map Compiler - {Path.GetFileNameWithoutExtension(file)}";
         button5.IsEnabled = true;
         UseMapPresets(Remembered(() => MapPresets.Load(file)));
+        LoadMapList(file);
         UpdateArgLabel();
     }
 
@@ -716,6 +937,7 @@ public partial class MainWindow : Window
         Title = "Source2 Map Compiler";
         button5.IsEnabled = false;
         UseMapPresets(remembered?.Options);
+        LoadMapList(null);
         UpdateArgLabel();
     }
 
@@ -1389,6 +1611,7 @@ public partial class MainWindow : Window
         {"labeltoolstatus", "Current tools status. resourcecompiler.exe must be present."},
         {"labeloverrideoutput", "Override map vpk output path."},
         {"labelopenvmap", "Open .vmap file."},
+        {"labelopendirectory", "Open a directory of .vmap files. (includes subfolders, can be edited in the list below)"},
         {"labelCompile", "Begin map compilation."},
     };
 
@@ -1466,6 +1689,18 @@ public partial class MainWindow : Window
             lines.ForEach(line => compile.Line(line.Text));
             compile.Partial(liveLine.Text);
             compileBar.Value = compile.Overall * 100;
+
+            if (compile.Map != shownMap)
+            {
+                shownMap = compile.Map;
+
+                if (OperatingSystem.IsWindows())
+                {
+                    lightmapPreview?.NextMap();
+                }
+            }
+
+            mapProgressLabel.Text = ListProgressText();
             statusLabel.Text = $"{compile.Text}  ·  {progressClock.Elapsed:hh\\:mm\\:ss}";
         }
 

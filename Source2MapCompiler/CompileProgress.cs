@@ -80,6 +80,9 @@ internal sealed partial class CompileProgress
         total = this.stages.Sum(stage => stage.Weight);
     }
 
+    // what map is being built, starts with 1
+    public int Map { get; private set; } = 1;
+
     // 0 to 1
     public double Overall => (stages.Take(current).Sum(stage => stage.Weight) + stages[current].Weight * Within()) / total;
 
@@ -94,6 +97,9 @@ internal sealed partial class CompileProgress
     // A line resourcecompiler finished printing
     public void Line(string line)
     {
+        const int loading = 1;
+        if (current > loading && stages[loading].Marker.IsMatch(line)) StartNextMap();
+
         for (var i = current + 1; i < stages.Length; i++)
         {
             if (stages[i].Marker.IsMatch(line))
@@ -124,6 +130,22 @@ internal sealed partial class CompileProgress
                 NavLine(line);
                 break;
         }
+    }
+
+    // reset the progress of last map when compiling multiple
+    private void StartNextMap()
+    {
+        Map++;
+        current = 0;
+        within = 0;
+        detail = "";
+        blocksDone = 0;
+        blockCount = 0;
+        baking = false;
+        volumesDone = 0;
+        volumeCount = 0;
+        mergesDone = 0;
+        mergeCount = 0;
     }
 
     // The line resourcecompiler is still printing, which is where a step's bar shows up, and vrad3's block and volume as it
