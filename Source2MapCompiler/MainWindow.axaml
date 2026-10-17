@@ -337,7 +337,7 @@
                                             <TextBlock Name="mapListCount" DockPanel.Dock="Right" Classes="note" Margin="0" VerticalAlignment="Center" />
                                             <TextBlock Classes="heading" Text="Maps" />
                                         </DockPanel>
-                                        <TextBlock Classes="note" Text="Compiled from top to botton" />
+                                        <TextBlock Classes="note" Text="Compiled from top to bottom" />
                                         <ScrollViewer MaxHeight="260">
                                             <StackPanel Name="mapListPanel" Margin="0,0,12,0" />
                                         </ScrollViewer>
